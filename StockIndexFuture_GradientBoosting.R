@@ -1,6 +1,9 @@
+#####Setting#####
+{
 library(gbm)
 library(readxl)
 library(MASS)
+}
 
 stockfuture <- read_excel("C:/RRR/完整資料.xlsx")
 summary(stockfuture)
