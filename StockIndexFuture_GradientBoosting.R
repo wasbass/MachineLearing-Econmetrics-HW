@@ -5,10 +5,13 @@ library(readxl)
 library(MASS)
 library(doParallel)
 library(DAAG)
+library(caret)
 }
 
 stockfuture <- read_excel("C:/RRR/完整資料.xlsx")
 summary(stockfuture)
+
+stockfuture <- stockfuture[,c(-4:-8,-10:-14,-21,-22,-23,-24,-25)]#如果不放落遲項的話
 
 stockfuture_train <- stockfuture[1:330,]
 stockfuture_test  <- stockfuture[331:475,]
@@ -17,9 +20,10 @@ rmse = function(actual, predicted) {
   sqrt(mean((actual - predicted) ^ 2))
 }
 
+plot(stockfuture$today_openchange)
 #####OLS#####
 set.seed(1)
-stockfuture_OLS <- cv.lm(data = stockfuture_train,form.lm = (nextday_openchange ~ . - date) , m = 10)
+stockfuture_OLS <- lm(data = stockfuture_train, nextday_openchange ~ . - date)
 summary(stockfuture_OLS)
 #R^2為0.4339，OLS樣本內MSE為0.806
 
@@ -66,10 +70,11 @@ summary(stockfuture_gbm)
 
 stockfuture.gbm.pred.train <- predict(stockfuture_gbm, newdata = stockfuture_train)
 rmse(stockfuture.gbm.pred.train, stockfuture_train$nextday_openchange)
-#Gradient Boosting樣本內MSE為0.8801
+#Gradient Boosting樣本內MSE為0.884
 
 stockfuture.gbm.pred.test  <- predict(stockfuture_gbm, newdata = stockfuture_test)
 rmse(stockfuture.gbm.pred.test, stockfuture_test$nextday_openchange)  
-#Gradient Boosting樣本外MSE為0.4839
+#Gradient Boosting樣本外MSE為0.482
 
+#從結果來看，不放落遲項的預測能力比較好，而且放了會有overfitting的問題
 

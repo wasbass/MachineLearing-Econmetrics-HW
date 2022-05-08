@@ -16,6 +16,8 @@
 
 stockfuture <- read_excel("C:/RRR/完整資料.xlsx")
 
+stockfuture <- stockfuture[,c(-4:-8,-10:-14,-21,-22,-23,-24,-25)]#如果不放落遲項的話
+
 ###如果設成factor跑gbm，R會當掉
 stockfuture$positive_revenue <- as.factor(ifelse(stockfuture$nextday_openchange >= 0,"1","0"))
 
@@ -27,13 +29,13 @@ stockfuture_test  <- stockfuture[331:475,]
 
 #####logit#####
 
-stockfuture_probit <- glm(positive_revenue ~ . - date - nextday_openchange - VIXchange - SP500change,
+stockfuture_probit <- glm(positive_revenue ~ . - date - nextday_openchange, #- VIXchange - SP500change,
                           data = stockfuture_train , family = binomial(probit)
                           )
 summary(stockfuture_probit)
 glm(positive_revenue ~ VIXchange + SP500change + VIXvolume + bitchange, data = stockfuture_train , family = binomial(probit))
 iv.mult(data.frame(stockfuture_train[,3:21]) , y = "positive_revenue" , summary =TRUE , verbose = FALSE)
-
+#iv.mult(data.frame(stockfuture_train[,3:36]) , y = "positive_revenue" , summary =TRUE , verbose = FALSE)
 #probit目前遇到algorithm did not converge的問題，可能某些變數的線性組合能完美的預測漲跌
 #可以看到SP500和VIX的變動可能可以完全的預測台指期走勢方向
 #這邊改用logit試試看
@@ -91,7 +93,7 @@ stockfuture.binary.gbm.pred.train_raw <- predict.gbm( object = stockfuture_binar
 stockfuture.binary.gbm.pred.train <- ifelse(stockfuture.binary.gbm.pred.train_raw >= log(0.6/0.4) , 1,0)
 
 stockfuture.binary.gbm.pred.test_raw <- predict.gbm( object = stockfuture_binary_gbm , newdata = stockfuture_test)
-stockfuture.binary.gbm.pred.test <- ifelse(stockfuture.binary.gbm.pred.test_raw >= log(0.6/0.4)  , 1,0)
+stockfuture.binary.gbm.pred.test <- ifelse(stockfuture.binary.gbm.pred.test_raw >= log(0.6/0.4) , 1,0) 
 
 #我們用的是Bernoulli Loss，他的回傳值是Log odds，因此若pred>0則為正，pred<0則為負
 #而因為在train裡面的陽性(正報酬)占比為0.6，我們這邊以0.6的log勝算比當作門檻值
