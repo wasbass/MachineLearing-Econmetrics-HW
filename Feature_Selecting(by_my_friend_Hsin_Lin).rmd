@@ -1,0 +1,193 @@
+---
+header-includes:
+- \usepackage{XeCJK}
+- \usepackage{fontspec}
+- \setCJKmainfont{微軟正黑體}
+- \XeTeXlinebreaklocale "zh"
+- \XeTeXlinebreakskip = 0pt plus 1pt
+
+title: "Machine Learning _ Final"
+author: "Hsin Lin (林鑫君)"
+date: "`r Sys.Date()`"
+output:
+   pdf_document:
+     latex_engine: xelatex
+---
+
+
+```{r, include=FALSE}
+library(glmnet)
+library(ggplot2)
+library(ISLR2)
+library(visreg)
+library(MetricsWeighted)
+library(randomForest)
+library(varSelRF)
+library(pROC)
+library(readxl)
+library(formatR)
+
+```
+
+
+```{r setup, include=FALSE}
+path <- 'C://RRR'
+knitr::opts_chunk$set(eval=TRUE, #在块中运行代码(default = TRUE)
+                      highlight = T, #高亮显示
+                      echo = T, #是否在输出中包含源代码
+                      tidy=TRUE,#是否整理代码
+                      error = F, #是否在输出中包含错误信息
+                      warning = F, #是否在输出中包含警告(default = TRUE)
+                      message  = F, #是否在输出中包含参考的信息
+                      cache=F)
+knitr::opts_knit$set(root.dir = path)
+```
+
+
+```{r}
+#ML <- read.csv("data.csv")
+ML <- read_excel("C:/RRR/ML.xlsx")
+train <- ML[1:351,]
+test <- ML[352:475,]
+
+ML_binary <- ML[,-2]
+ML_binary$positive_revenue <- as.factor(ifelse(ML$nextday_openchange >= 0,"1","0"))
+binary_train <-  ML_binary[1:351,]
+binary_test <- ML_binary[352:475,]
+```
+
+
+```{r}
+rmse = function(actual, predicted) {
+  sqrt(mean((actual - predicted) ^ 2))
+}
+########### LASSO ########### 
+set.seed(987)
+####係數收斂圖
+lasso <- glmnet(as.matrix(train[,3:34]), as.matrix(train[,2]), alpha=1, nfolds=10, family="gaussian")
+plot(lasso)
+
+####找最佳lambda
+lasso.cv <- cv.glmnet(as.matrix(train[,3:34]), as.matrix(train[,2]), alpha=1, nfolds=10, family="gaussian")
+plot(lasso.cv )
+
+####挑選變數
+select.ind = which(coef(lasso.cv, s = "lambda.min") != 0)
+select.ind = select.ind[-1]-1 # remove `Intercept` and 平移剩下的ind
+select.varialbes = colnames(train)[select.ind]# 挑出重要變數的名稱
+select.varialbes# 重要變數
+
+coef(lasso.cv, s = exp(-2))#挑出6個
+
+####預測
+lasso.test <- predict(lasso, s = log(lasso.cv$lambda.min), newx = as.matrix(test[,3:34]))
+rmse(as.matrix(test[,2]), lasso.test)
+
+####binary
+lasso_binary <- glmnet(as.matrix(binary_train[,2:36]), as.matrix(binary_train[,37]), alpha=1, nfolds=10, family="binomial")
+plot(lasso_binary)
+
+lasso_binary.cv <- cv.glmnet(as.matrix(binary_train[,2:36]), as.matrix(binary_train[,37]), alpha=1, nfolds=10, family="binomial")
+plot(lasso_binary.cv)
+
+select_binary.ind = which(coef(lasso_binary.cv, s = "lambda.min") != 0)
+select_binary.ind = select_binary.ind[-1]-1 # remove `Intercept` and 平移剩下的ind
+select.varialbes = colnames(binary_train)[select_binary.ind]# 挑出重要變數的名稱
+select.varialbes# 重要變數
+
+coef(lasso_binary.cv, s = exp(-3.2))#挑出6個
+
+```
+
+
+```{r}
+########### Random Forest ###########
+set.seed(487)
+
+####800棵樹測試一波
+test_forest <- randomForest(nextday_openchange ~ ., data=train, ntree=800,important=TRUE,proximity=TRUE)
+plot(test_forest)
+
+
+
+forest_binary_pred
+####感覺200棵樹後就滿穩定的，取200棵
+final_forest <- randomForest(nextday_openchange ~ ., data=train,
+                        ntree=200,important=TRUE,proximity=TRUE)
+
+
+####預測
+forest_pred <- predict(final_forest, newdata=test)
+
+
+####變數重要性 - VIX S&P500最屌
+importance(final_forest)
+varImpPlot(final_forest, sort = TRUE)
+
+####二元
+test_binary_forest <- randomForest(positive_revenue ~ ., data=binary_train, ntree=200,important=TRUE,proximity=TRUE)
+varImpPlot(test_binary_forest)
+
+```
+
+
+```{r}
+########### PCA ###########
+pca = prcomp(train[,3:34], scale. = T)
+
+
+####陡坡圖
+plot(pca,ylim = c(0,5), type="line", main="Scree Plot")
+abline(h=1, col="blue") # 用藍線標示出特徵值=1的地方
+
+####累積解釋圖(Pareto plot)
+vars <- (pca$sdev)^2  # 從pca中取出標準差(pca$sdev)後再平方，計算variance(特徵值)
+
+
+props <- vars / sum(vars)  # 計算每個主成分的解釋比例 = 各個主成分的特徵值/總特徵值  
+
+
+cumulative.props <- cumsum(props)  # 累加每個主成份的解釋比例(aggregated effects)
+
+plot(cumulative.props)
+
+####取前3個維度作為新的資料集 
+top3_pca.data <- pca$x[, 1:3]
+
+
+####取前3個維度的特徵向量
+top3.pca.eigenvector <- pca$rotation[, 1:3]
+
+
+first.pca <- top3.pca.eigenvector[, 1]   #  第一維
+second.pca <- top3.pca.eigenvector[, 2]  #  第一維
+third.pca <- top3.pca.eigenvector[, 3]   #  第一維
+
+
+####第一維變數重要性
+first.pca[order(first.pca, decreasing=FALSE)]  
+dotchart(first.pca[order(first.pca, decreasing=FALSE)] ,   # 排序後的係數
+         main="Loading Plot for PC1",                      # 主標題
+         xlab="Variable Loadings",                         # x軸的標題
+         col="red")                                        # 顏色
+
+
+####第二維變數重要性
+second.pca[order(second.pca, decreasing=FALSE)]  
+dotchart(second.pca[order(second.pca, decreasing=FALSE)] ,  
+         main="Loading Plot for PC2",                       
+         xlab="Variable Loadings",                          
+         col="blue")                                        
+
+
+####第三維變數重要性
+third.pca[order(third.pca, decreasing=FALSE)]  
+dotchart(third.pca[order(third.pca, decreasing=FALSE)] ,   
+         main="Loading Plot for PC3",                      
+         xlab="Variable Loadings",                         
+         col="purple")                                     
+
+
+# 選取 PC1~2 繪製這兩個維度的負荷圖
+biplot(pca, choices=1:2)  
+```
