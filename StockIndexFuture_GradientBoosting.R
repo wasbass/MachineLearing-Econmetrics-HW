@@ -24,39 +24,18 @@ rmse = function(actual, predicted) {
 
 plot(stockfuture$trend,stockfuture$today_openchange)
 
-#####ADF檢定#####
-#確認我們的X和Y是否都為I(0)
-# adf.test(stockfuture$nextday_openchange)
-# adf.test(stockfuture$today_indaychange)
-# adf.test(stockfuture$today_volume)
-# adf.test(stockfuture$dealer)
-# adf.test(stockfuture$trust_invest)
-# adf.test(stockfuture$foreign_invest)
-# adf.test(stockfuture$SP500change)
-# adf.test(stockfuture$SP500volume)
-# adf.test(stockfuture$interestchange)
-# adf.test(stockfuture$USDchange)
-# adf.test(stockfuture$VIXchange)
-# adf.test(stockfuture$VIXvolume)
-# adf.test(stockfuture$bitchange)
-# adf.test(stockfuture$bitvolume)
-# adf.test(stockfuture$ETHchange)
-# adf.test(stockfuture$ETHvolume)
-# adf.test(stockfuture$covidchange)
-#都為I(0)
-
 #####Without feature selecting#####
 
 #Tuning
 ctrl <- trainControl(method = "repeatedcv",number = 10, repeats = 2, allowParallel = T) #重複的cv，每次分10組，重複2次
 registerDoParallel(detectCores()-1)
-grid <- expand.grid(n.trees = c(5000,10000,20000), interaction.depth=c(1:3), shrinkage=c(0.05,0.01,0.001) , n.minobsinnode=c(5,10,20))
+grid <- expand.grid(n.trees = c(5000,10000,20000), interaction.depth=c(1:3), shrinkage=c(0.05,0.01,0.001) , n.minobsinnode=c(10,25,50))
 
 # set.seed(1)
 # stockfuture.gbm.caret <- caret::train(nextday_openchange ~ . - date , data = stockfuture_train, method = "gbm", metric = "RMSE",
 #                                       trControl = ctrl, tuneGrid = grid)
 # print(stockfuture.gbm.caret)
-#從結果來看，n.trees = 10000，shrinkage=0.001，interaction.depth=1，n.minobsinnode=5會使得樣本內的RMSE在CV下最小化，達到0.8361
+#從結果來看，n.trees = 10000，shrinkage=0.001，interaction.depth=1，n.minobsinnode=50會使得樣本內的RMSE在CV下最小化，達到0.8361
 
 #Build Model
 set.seed(1)
@@ -69,6 +48,7 @@ stockfuture_gbm <- gbm(nextday_openchange ~ . - date , data = stockfuture_train,
 #在我們持續加大n.minobsinnode後，樣本外MSE反而越來越小
 #因此我們最後選擇用小的shrinkage，大的n.trees來增強學習能力
 #並且用小的interaction.depth，大的n.minobsinnode來避免過度配適問題
+#之後的control都只會考慮n.tree=c(2500,5000,10000)，interaction.depth=c(1,2)，並且把n.minobsinnode固定在50，shrinkage固定在0.001
 
 sum(summary(stockfuture_gbm)$rel.inf)#合計為100，代表每個變數影響力所佔的百分比
 summary(stockfuture_gbm)
@@ -94,19 +74,30 @@ stockfuture_PCA <- cbind( nextday_openchange =  stockfuture$nextday_openchange ,
 stockfuture_PCA_train <- stockfuture_PCA[1:351,]
 stockfuture_PCA_test  <- stockfuture_PCA[352:475,]
 
+#Tuning
+ctrl <- trainControl(method = "repeatedcv",number = 10, repeats = 2, allowParallel = T) #重複的cv，每次分10組，重複2次
+registerDoParallel(detectCores()-1)
+grid <- expand.grid(n.trees = c(2500,5000,10000), interaction.depth=c(1:2), shrinkage=c(0.001) , n.minobsinnode=c(50))
+
+#set.seed(1)
+#stockfuture.gbm.PCA.caret <- caret::train(nextday_openchange ~ . , data = stockfuture_PCA_train, method = "gbm", metric = "RMSE",
+#                                       trControl = ctrl, tuneGrid = grid)
+#print(stockfuture.gbm.PCA.caret)
+#篩選變數後，n.tree=5000，interaction.depth=2
+
 set.seed(1)
 stockfuture_PCA_gbm <- gbm(nextday_openchange ~ . , data = stockfuture_PCA_train,
-                       distribution = "gaussian", n.trees = 10000,
-                       interaction.depth = 1, shrinkage = 0.001,
+                       distribution = "gaussian", n.trees = 5000,
+                       interaction.depth = 2, shrinkage = 0.001,
                        bag.fraction = 0.5, cv.folds = 10,n.minobsinnode=50)
 
-stockfuture.PCA.gbm.pred.train  <- predict(stockfuture_PCA_gbm, newdata = stockfuture_PCA_train)
+istockfuture.PCA.gbm.pred.train  <- predict(stockfuture_PCA_gbm, newdata = stockfuture_PCA_train)
 rmse(stockfuture.PCA.gbm.pred.train, stockfuture_PCA_train$nextday_openchange)
 #樣本內MSE為0.886
 
 stockfuture.PCA.gbm.pred.test  <- predict(stockfuture_PCA_gbm, newdata = stockfuture_PCA_test)
 rmse(stockfuture.PCA.gbm.pred.test, stockfuture_PCA_test$nextday_openchange)  
-#PCA的Gradient Boosting樣本外MSE為0.593
+#PCA的Gradient Boosting樣本外MSE為0.598
 
 #####LASSO#####
 stockfuture %>%
@@ -115,19 +106,30 @@ stockfuture %>%
 stockfuture_LASSO_train <- stockfuture_LASSO[1:351,]
 stockfuture_LASSO_test  <- stockfuture_LASSO[352:475,]
 
+#Tuning
+ctrl <- trainControl(method = "repeatedcv",number = 10, repeats = 2, allowParallel = T) #重複的cv，每次分10組，重複2次
+registerDoParallel(detectCores()-1)
+grid <- expand.grid(n.trees = c(2500,5000,10000), interaction.depth=c(1:2), shrinkage=c(0.001) , n.minobsinnode=c(50))
+
+#set.seed(1)
+#stockfuture.gbm.LASSO.caret <- caret::train(nextday_openchange ~ . , data = stockfuture_LASSO_train, method = "gbm", metric = "RMSE",
+#                                          trControl = ctrl, tuneGrid = grid)
+#print(stockfuture.gbm.LASSO.caret)
+#篩選變數後，n.tree=5000，interaction.depth=1
+
 set.seed(1)
 stockfuture_LASSO_gbm <- gbm(nextday_openchange ~ . , data = stockfuture_LASSO_train,
-                           distribution = "gaussian", n.trees = 10000,
+                           distribution = "gaussian", n.trees = 5000,
                            interaction.depth = 1, shrinkage = 0.001,
-                           bag.fraction = 0.5, cv.folds = 10,n.minobsinnode=50)
+                           bag.fraction = 0.5, cv.folds = 10,n.minobsinnode=50)y
 
 stockfuture.LASSO.gbm.pred.train  <- predict(stockfuture_LASSO_gbm, newdata = stockfuture_LASSO_train)
 rmse(stockfuture.LASSO.gbm.pred.train, stockfuture_LASSO_train$nextday_openchange)  
-#樣本內MSE為0.859
+#樣本內MSE為0.861
 
 stockfuture.LASSO.gbm.pred.test  <- predict(stockfuture_LASSO_gbm, newdata = stockfuture_LASSO_test)
 rmse(stockfuture.LASSO.gbm.pred.test, stockfuture_LASSO_test$nextday_openchange)  
-#LASSO的Gradient Boosting樣本外MSE為0.497
+#LASSO的Gradient Boosting樣本外MSE為0.492
 
 #####RF#####
 stockfuture %>%
@@ -136,15 +138,26 @@ stockfuture %>%
 stockfuture_RF_train <- stockfuture_RF[1:351,]
 stockfuture_RF_test  <- stockfuture_RF[352:475,]
 
+#Tuning
+ctrl <- trainControl(method = "repeatedcv",number = 10, repeats = 2, allowParallel = T) #重複的cv，每次分10組，重複2次
+registerDoParallel(detectCores()-1)
+grid <- expand.grid(n.trees = c(2500,5000,10000), interaction.depth=c(1:2), shrinkage=c(0.001) , n.minobsinnode=c(50))
+
+#set.seed(1)
+#stockfuture.gbm.RF.caret <- caret::train(nextday_openchange ~ . , data = stockfuture_RF_train, method = "gbm", metric = "RMSE",
+#                                            trControl = ctrl, tuneGrid = grid)
+#print(stockfuture.gbm.RF.caret)
+#n.tree=2500，interaction.depth=2
+
 set.seed(1)
 stockfuture_RF_gbm <- gbm(nextday_openchange ~ . , data = stockfuture_RF_train,
-                             distribution = "gaussian", n.trees = 10000,
-                             interaction.depth = 1, shrinkage = 0.001,
+                             distribution = "gaussian", n.trees = 2500,
+                             interaction.depth = 2, shrinkage = 0.001,
                              bag.fraction = 0.5, cv.folds = 10,n.minobsinnode=50)
 
 stockfuture.RF.gbm.pred.test  <- predict(stockfuture_RF_gbm, newdata = stockfuture_RF_test)
 rmse(stockfuture.RF.gbm.pred.test, stockfuture_RF_test$nextday_openchange)  
-#RF的Gradient Boosting樣本外MSE為0.486，比原本的好
+#RF的Gradient Boosting樣本外MSE為0.474，比原本的好
 
 #加碼再看看樣本內的MSE
 stockfuture.RF.gbm.pred.train  <- predict(stockfuture_RF_gbm, newdata = stockfuture_RF_train)
@@ -160,24 +173,44 @@ stockfuture %>%
 stockfuture_core_train <- stockfuture_core[1:351,]
 stockfuture_core_test  <- stockfuture_core[352:475,]
 
-#Gradient Boosting
+#Tuning
+ctrl <- trainControl(method = "repeatedcv",number = 10, repeats = 2, allowParallel = T) #重複的cv，每次分10組，重複2次
+registerDoParallel(detectCores()-1)
+grid <- expand.grid(n.trees = c(2500,5000,10000), interaction.depth=c(1:2), shrinkage=c(0.001) , n.minobsinnode=c(50))
+
+#set.seed(1)
+#stockfuture.gbm.core.caret <- caret::train(nextday_openchange ~ . , data = stockfuture_core_train, method = "gbm", metric = "RMSE",
+#                                         trControl = ctrl, tuneGrid = grid)
+#print(stockfuture.gbm.core.caret)
+#n.tree=2500，interaction.depth=2
+
 set.seed(1)
 stockfuture_core_gbm <- gbm(nextday_openchange ~ . , data = stockfuture_core_train,
-                          distribution = "gaussian", n.trees = 10000,
+                          distribution = "gaussian", n.trees = 2500,
                           interaction.depth = 1, shrinkage = 0.001,
                           bag.fraction = 0.5, cv.folds = 10,n.minobsinnode=50)
 
 stockfuture.core.gbm.pred.train  <- predict(stockfuture_core_gbm, newdata = stockfuture_core_train)
 rmse(stockfuture.core.gbm.pred.train, stockfuture_core_train$nextday_openchange) 
-#樣本內MSE為0.892
+#樣本內MSE為0.894
 
 stockfuture.core.gbm.pred.test  <- predict(stockfuture_core_gbm, newdata = stockfuture_core_test)
 rmse(stockfuture.core.gbm.pred.test, stockfuture_core_test$nextday_openchange)  
-#core的Gradient Boosting樣本外MSE為0.490，比原本的好
+#core的Gradient Boosting樣本外MSE為0.487，比原本的好
 
 
 #####結論#####
 #不做篩選的Gradient Boosting的樣本外預測已經蠻不錯的了
 #但是經過Random Forest篩選變數後再做Gradient Boosting，樣本外預測的結果會更好
+#代表如果在Gradient Boosting中放入太多不相關的變數，可能會有overfitting的問題
 #相較之下，PCA和LASSO的篩選變數結果就不那麼優秀
 #而若是拿LASSO和Random Forest都有選到的變數做預測，結果也不錯
+
+#在所有方法中，先用RF篩選變數，再用Gradient Boosting做預測的結果是最好的
+#我們可以考慮依此作為投資策略
+bias_square <- mean(stockfuture.RF.gbm.pred.test - stockfuture_RF_test$nextday_openchange)^2
+variance    <- rmse(stockfuture.RF.gbm.pred.test , stockfuture_RF_test$nextday_openchange) - bias_square
+bias_square
+variance
+sqrt(variance)
+

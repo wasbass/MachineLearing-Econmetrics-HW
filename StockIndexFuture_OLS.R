@@ -12,6 +12,12 @@ summary(stockfuture)
 stockfuture_train <- stockfuture[1:351,]
 stockfuture_test  <- stockfuture[352:475,]
 
+summary(stockfuture_train)
+summary(stockfuture_test)
+
+sd(stockfuture_train$nextday_openchange)
+sd(stockfuture_test$nextday_openchange)
+
 rmse = function(actual, predicted) {
   sqrt(mean((actual - predicted) ^ 2))
 }
