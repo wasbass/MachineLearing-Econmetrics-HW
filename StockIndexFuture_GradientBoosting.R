@@ -1,4 +1,4 @@
-#####Setting#####
+#####Package#####
 {
 library(gbm)
 library(readxl)
@@ -10,8 +10,19 @@ library(dplyr)
 library(tseries)
 }
 
-stockfuture <- read_excel("C:/RRR/完整資料.xlsx")
+#####Setting#####
+setwd("C:/RRR/")
+stockfuture <- read_excel("完整資料.xlsx")
 summary(stockfuture)
+
+stockfuture_train <- stockfuture[1:351,]
+stockfuture_test  <- stockfuture[352:475,]
+
+rmse = function(actual, predicted) {
+  sqrt(mean((actual - predicted) ^ 2))
+}
+
+plot(stockfuture$trend,stockfuture$today_openchange)
 
 #####ADF檢定#####
 #確認我們的X和Y是否都為I(0)
@@ -35,32 +46,6 @@ summary(stockfuture)
 #都為I(0)
 
 #####Without feature selecting#####
-
-stockfuture_train <- stockfuture[1:351,]
-stockfuture_test  <- stockfuture[352:475,]
-
-rmse = function(actual, predicted) {
-  sqrt(mean((actual - predicted) ^ 2))
-}
-
-plot(stockfuture$trend,stockfuture$today_openchange)
-#####OLS#####
-set.seed(1)
-stockfuture_OLS <- lm(data = stockfuture_train, nextday_openchange ~ . - date)
-summary(stockfuture_OLS)
-#R^2為0.5102，OLS樣本內MSE為0.7549
-
-stockfuture.OLS.pred.test  <- predict(stockfuture_OLS, newdata = stockfuture_test)
-rmse(stockfuture.OLS.pred.test, stockfuture_test$nextday_openchange)
-#OLS樣本外MSE為0.7308
-
-#同場加映，台指期與美股的相對關係
-summary(lm(SP500change ~ . , data = stockfuture_train))
-summary(lm(SP500change ~ today_openchange + today_indaychange + today_volume, data = stockfuture_train))
-summary(lm(nextday_openchange ~ SP500change , data = stockfuture_train))
-#台股受美股影響比較大
-
-#####Gradient Boosting#####
 
 #Tuning
 ctrl <- trainControl(method = "repeatedcv",number = 10, repeats = 2, allowParallel = T) #重複的cv，每次分10組，重複2次
@@ -102,82 +87,55 @@ rmse(stockfuture.gbm.pred.test, stockfuture_test$nextday_openchange)
 #從結果來看，不放落遲項的預測能力比較好，而且放了會有overfitting的問題
 
 
-#####After feature selecting#####
 #####PCA#####
-PCA <- read.csv("C:/RRR/PCA.csv")
+PCA <- read.csv("PCA.csv")
 stockfuture_PCA <- cbind( nextday_openchange =  stockfuture$nextday_openchange , PCA)
 
 stockfuture_PCA_train <- stockfuture_PCA[1:351,]
 stockfuture_PCA_test  <- stockfuture_PCA[352:475,]
 
-#OLS
-set.seed(1)
-stockfuture_PCA_OLS <- lm(data = stockfuture_PCA_train , nextday_openchange ~ .)
-summary(stockfuture_PCA_OLS)
-#R^2為0.3612，OLS樣本內MSE為0.825
-
-stockfuture.PCA.OLS.pred.test  <- predict(stockfuture_PCA_OLS, newdata = stockfuture_PCA_test)
-rmse(stockfuture.PCA.OLS.pred.test , stockfuture_PCA_test$nextday_openchange)
-#PCA的OLS之樣本外MSE為0.604
-
-#Gradient Boosting
 set.seed(1)
 stockfuture_PCA_gbm <- gbm(nextday_openchange ~ . , data = stockfuture_PCA_train,
                        distribution = "gaussian", n.trees = 10000,
                        interaction.depth = 1, shrinkage = 0.001,
                        bag.fraction = 0.5, cv.folds = 10,n.minobsinnode=50)
 
+stockfuture.PCA.gbm.pred.train  <- predict(stockfuture_PCA_gbm, newdata = stockfuture_PCA_train)
+rmse(stockfuture.PCA.gbm.pred.train, stockfuture_PCA_train$nextday_openchange)
+#樣本內MSE為0.886
+
 stockfuture.PCA.gbm.pred.test  <- predict(stockfuture_PCA_gbm, newdata = stockfuture_PCA_test)
 rmse(stockfuture.PCA.gbm.pred.test, stockfuture_PCA_test$nextday_openchange)  
 #PCA的Gradient Boosting樣本外MSE為0.593
 
 #####LASSO#####
-stockfuture <- read_excel("C:/RRR/完整資料.xlsx")
 stockfuture %>%
-  select(nextday_openchange,openchange_lag1,SP500change,SP500change_lag4,USDchange,VIXchange,bitchange) -> stockfuture_lasso
+  dplyr::select(nextday_openchange,openchange_lag1,SP500change,SP500change_lag4,USDchange,VIXchange,bitchange) -> stockfuture_LASSO
 
-stockfuture_lasso_train <- stockfuture_lasso[1:351,]
-stockfuture_lasso_test  <- stockfuture_lasso[352:475,]
+stockfuture_LASSO_train <- stockfuture_LASSO[1:351,]
+stockfuture_LASSO_test  <- stockfuture_LASSO[352:475,]
 
-#OLS
 set.seed(1)
-stockfuture_lasso_OLS <- lm(data = stockfuture_lasso_train , nextday_openchange ~ .)
-summary(stockfuture_lasso_OLS)
-#R^2為0.4391，OLS樣本內MSE為0.7731
-
-stockfuture.lasso.OLS.pred.test  <- predict(stockfuture_lasso_OLS, newdata = stockfuture_lasso_test)
-rmse(stockfuture.lasso.OLS.pred.test , stockfuture_lasso_test$nextday_openchange)
-#lasso的OLS之樣本外MSE為0.504
-
-#Gradient Boosting
-set.seed(1)
-stockfuture_lasso_gbm <- gbm(nextday_openchange ~ . , data = stockfuture_lasso_train,
+stockfuture_LASSO_gbm <- gbm(nextday_openchange ~ . , data = stockfuture_LASSO_train,
                            distribution = "gaussian", n.trees = 10000,
                            interaction.depth = 1, shrinkage = 0.001,
                            bag.fraction = 0.5, cv.folds = 10,n.minobsinnode=50)
 
-stockfuture.lasso.gbm.pred.test  <- predict(stockfuture_lasso_gbm, newdata = stockfuture_lasso_test)
-rmse(stockfuture.lasso.gbm.pred.test, stockfuture_lasso_test$nextday_openchange)  
-#lasso的Gradient Boosting樣本外MSE為0.496
+stockfuture.LASSO.gbm.pred.train  <- predict(stockfuture_LASSO_gbm, newdata = stockfuture_LASSO_train)
+rmse(stockfuture.LASSO.gbm.pred.train, stockfuture_LASSO_train$nextday_openchange)  
+#樣本內MSE為0.859
+
+stockfuture.LASSO.gbm.pred.test  <- predict(stockfuture_LASSO_gbm, newdata = stockfuture_LASSO_test)
+rmse(stockfuture.LASSO.gbm.pred.test, stockfuture_LASSO_test$nextday_openchange)  
+#LASSO的Gradient Boosting樣本外MSE為0.497
 
 #####RF#####
-#stockfuture <- read_excel("C:/RRR/完整資料.xlsx")
 stockfuture %>%
-  select(nextday_openchange,VIXchange,SP500change,SP500volume,today_volume,indaychange_lag2,VIXvolume) -> stockfuture_RF
+  dplyr::select(nextday_openchange,VIXchange,SP500change,SP500volume,today_volume,indaychange_lag2,VIXvolume) -> stockfuture_RF
 
 stockfuture_RF_train <- stockfuture_RF[1:351,]
 stockfuture_RF_test  <- stockfuture_RF[352:475,]
 
-#OLS
-stockfuture_RF_OLS <- lm(data = stockfuture_RF_train , nextday_openchange ~ .)
-summary(stockfuture_RF_OLS)
-#R^2為0.3448，OLS樣本內MSE為0.8355
-
-stockfuture.RF.OLS.pred.test  <- predict(stockfuture_RF_OLS, newdata = stockfuture_RF_test)
-rmse(stockfuture.RF.OLS.pred.test , stockfuture_RF_test$nextday_openchange)
-#RF的OLS之樣本外MSE為0.508
-
-#Gradient Boosting
 set.seed(1)
 stockfuture_RF_gbm <- gbm(nextday_openchange ~ . , data = stockfuture_RF_train,
                              distribution = "gaussian", n.trees = 10000,
@@ -197,20 +155,10 @@ rmse(stockfuture.RF.gbm.pred.train, stockfuture_RF_train$nextday_openchange)
 #####LASSO和RF的交集變數#####
 #只有SP500change和VIXchange
 stockfuture %>%
-  select(nextday_openchange,SP500change,VIXchange) -> stockfuture_core
+  dplyr::select(nextday_openchange,SP500change,VIXchange) -> stockfuture_core
 
 stockfuture_core_train <- stockfuture_core[1:351,]
 stockfuture_core_test  <- stockfuture_core[352:475,]
-
-
-#OLS
-stockfuture_core_OLS <- lm(data = stockfuture_core_train , nextday_openchange ~ .)
-summary(stockfuture_core_OLS)
-#R^2為0.3229，OLS樣本內MSE為0.8445
-
-stockfuture.core.OLS.pred.test  <- predict(stockfuture_core_OLS, newdata = stockfuture_core_test)
-rmse(stockfuture.core.OLS.pred.test , stockfuture_core_test$nextday_openchange)
-#core的OLS之樣本外MSE為0.498
 
 #Gradient Boosting
 set.seed(1)
@@ -219,9 +167,14 @@ stockfuture_core_gbm <- gbm(nextday_openchange ~ . , data = stockfuture_core_tra
                           interaction.depth = 1, shrinkage = 0.001,
                           bag.fraction = 0.5, cv.folds = 10,n.minobsinnode=50)
 
+stockfuture.core.gbm.pred.train  <- predict(stockfuture_core_gbm, newdata = stockfuture_core_train)
+rmse(stockfuture.core.gbm.pred.train, stockfuture_core_train$nextday_openchange) 
+#樣本內MSE為0.892
+
 stockfuture.core.gbm.pred.test  <- predict(stockfuture_core_gbm, newdata = stockfuture_core_test)
 rmse(stockfuture.core.gbm.pred.test, stockfuture_core_test$nextday_openchange)  
 #core的Gradient Boosting樣本外MSE為0.490，比原本的好
+
 
 #####結論#####
 #不做篩選的Gradient Boosting的樣本外預測已經蠻不錯的了
