@@ -206,11 +206,16 @@ rmse(stockfuture.core.gbm.pred.test, stockfuture_core_test$nextday_openchange)
 #相較之下，PCA和LASSO的篩選變數結果就不那麼優秀
 #而若是拿LASSO和Random Forest都有選到的變數做預測，結果也不錯
 
-#在所有方法中，先用RF篩選變數，再用Gradient Boosting做預測的結果是最好的
-#我們可以考慮依此作為投資策略
-bias_square <- mean(stockfuture.RF.gbm.pred.test - stockfuture_RF_test$nextday_openchange)^2
-variance    <- rmse(stockfuture.RF.gbm.pred.test , stockfuture_RF_test$nextday_openchange) - bias_square
-bias_square
-variance
-sqrt(variance)
+#####預測Y_hat#####
 
+newdata_0712 <- read_excel("newdata.xlsx",sheet = "2107-12")
+newdata_0104 <- read_excel("newdata.xlsx",sheet = "2201-04")
+stockfuture.RF.gbm.pred.0712  <- predict(stockfuture_RF_gbm, newdata = newdata_0712)
+rmse(stockfuture.RF.gbm.pred.0712,newdata_0712$nextday_openchange)
+
+stockfuture.RF.gbm.pred.0104  <- predict(stockfuture_RF_gbm, newdata = newdata_0104)
+rmse(stockfuture.RF.gbm.pred.0104[1:71],as.numeric(newdata_0104$nextday_openchange[1:71]))
+
+append(stockfuture.RF.gbm.pred.0712 ,stockfuture.RF.gbm.pred.0104)
+write.csv(append(stockfuture.RF.gbm.pred.0712 ,stockfuture.RF.gbm.pred.0104),
+          file = "predicted_openchange.csv")
