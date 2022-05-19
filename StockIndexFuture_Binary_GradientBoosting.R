@@ -28,63 +28,12 @@ summary(stockfuture)
 stockfuture_train <- stockfuture[1:351,]
 stockfuture_test  <- stockfuture[352:475,]
 
-#####Without feature selection#####
-
-#####logit#####
-
-stockfuture_probit <- glm(positive_revenue ~ . - date - nextday_openchange, #- VIXchange - SP500change,
-                          data = stockfuture_train , family = binomial(probit)
-                          )
-summary(stockfuture_probit)
-#glm(positive_revenue ~ VIXchange + SP500change + VIXvolume + bitchange, data = stockfuture_train , family = binomial(probit))
-iv.mult(data.frame(stockfuture_train[,3:ncol(stockfuture_train)]) , y = "positive_revenue" , summary =TRUE , verbose = FALSE)
-#iv.mult(data.frame(stockfuture_train[,3:36]) , y = "positive_revenue" , summary =TRUE , verbose = FALSE)
-#probit可能遇到algorithm did not converge的問題，可能某些變數的線性組合能完美的預測漲跌
-#可以看到SP500和VIX的變動可能可以完全的預測台指期走勢方向
-#這邊改用logit試試看
-stockfuture_logit <- glm(positive_revenue ~ . - date - nextday_openchange , data = stockfuture_train , family = binomial("logit"))
-summary(stockfuture_logit)
-coeftest(stockfuture_logit, vcov. = vcovHC, type = "HC3")
-logLik(stockfuture_logit)
-logitmfx(positive_revenue ~ . - date - nextday_openchange , data = stockfuture_train, atmean = FALSE) #APE instead of PEA
-
-#觀察預測結果
-sum(stockfuture_train$positive_revenue=="1")
-#而因為在train裡面的陽性(正報酬)占比為213/351 ~= 0.606 ，我們這邊以0.6的log勝算比當作門檻值
-stockfuture.binary.logit.pred.train_raw <- predict( stockfuture_logit , newdata = stockfuture_train)
-stockfuture.binary.logit.pred.train <- ifelse(stockfuture.binary.logit.pred.train_raw >= log(0.6/0.4) , 1,0)
-
-stockfuture.binary.logit.pred.test_raw <- predict( stockfuture_logit , newdata = stockfuture_test)
-stockfuture.binary.logit.pred.test <- ifelse(stockfuture.binary.logit.pred.test_raw >= log(0.6/0.4) , 1,0)
-
-confusionMatrix(data = factor(stockfuture.binary.logit.pred.train) , reference = factor(stockfuture_train$positive_revenue),positive = "1")
-confusionMatrix(data = factor(stockfuture.binary.logit.pred.test) , reference = factor(stockfuture_test$positive_revenue),positive = "1")
-#Accuracy為0.7661
-#TPR(true positive rate)為0.7164，TNR(true negative rate)為0.8246
-#PPV(positive predictive value)為0.8276，NPV(negative predictive value)為0.7121
-
-pred_logit_train <- prediction(stockfuture.binary.logit.pred.train_raw , stockfuture_train$positive_revenue) 
-perf_logit_train <-performance (pred_logit_train , measure = "tpr" , x.measure = "fpr")
-performance(pred_logit_train, measure = "auc")@y.values[[1]]
-#樣本內AUC為0.860
-
-pred_logit <- prediction(stockfuture.binary.logit.pred.test_raw , stockfuture_test$positive_revenue) 
-perf_logit <-performance (pred_logit , measure = "tpr" , x.measure = "fpr")
-performance(pred_logit, measure = "auc")@y.values[[1]]
-#LASSO樣本外AUC為0.844
-
-
-#####Gradient Boosting#####
-
-stockfuture$positive_revenue <- ifelse(stockfuture$nextday_openchange >= 0,"1","0")
-stockfuture_train <- stockfuture[1:351,]
-stockfuture_test  <- stockfuture[352:475,]
-
+#####Without Feature Selelction#####
 
 #Tuning
 ctrl <- trainControl(method = "repeatedcv",number = 10, repeats = 2, allowParallel = T , verboseIter = TRUE) #重複的cv，每次分10組，重複2次
 registerDoParallel(detectCores()-1)
-grid <- expand.grid(n.trees = c(2500,5000,10000), interaction.depth=c(1:2), shrinkage=c(0.001) , n.minobsinnode=c(10,25,50,75))
+grid <- expand.grid(n.trees = c(2500,5000,10000), interaction.depth=c(1:2), shrinkage=c(0.001) , n.minobsinnode=c(5,10,20,40))
 
 #set.seed(1)
 #stockfuture.gbm.caret <- caret::train(positive_revenue ~ . - date - nextday_openchange, data = stockfuture_train, method = "gbm", metric = "Accuracy",
@@ -95,6 +44,7 @@ grid <- expand.grid(n.trees = c(2500,5000,10000), interaction.depth=c(1:2), shri
 #n.minobsinnode稍微大點表現越好
 #最後決定n.minobsinnode=50，interaction.depth=1(or 2)，shrinkage=0.001，n.tree=5000
 #之後則會藉由n.tree=c(2500,5000,10000)，interaction.depth =c(1,2)來決定參數，並且shrinkage固定為0.001，n.minobsinnode固定為40
+grid <- expand.grid(n.tree=c(2500,5000,10000), interaction.depth=c(1:2), shrinkage=c(0.001) , n.minobsinnode=c(40))
 
 #build model
 stockfuture$positive_revenue <- ifelse(stockfuture$nextday_openchange >= 0,1,0)
@@ -137,49 +87,19 @@ perf_gbm <-performance (pred_gbm , measure = "tpr" , x.measure = "fpr")
 performance(pred_gbm, measure = "auc")@y.values[[1]]
 #Gradient Boosting樣本外AUC為0.867
 
-#畫ROC圖
-windows()
-plot(perf_gbm , col = "red" , main = "ROC curve" , xlab = "1-Specificity (FPR)" , ylab = "Sensitivity(TPR)" , lwd = 5)
-plot(perf_logit , col = "blue" , lwd = 5 , add = TRUE)
-abline(0, 1 , lwd = 2)
-legend("bottomright",legend = c("GradientBoosting(AUC = 0.867)","Logistic(AUC = 0.844)"), lty = 1 , col = c("red","blue") , lwd = 5)
+#畫ROC圖(要跟logistic一起跑)
+# windows()
+# plot(perf_gbm , col = "red" , main = "ROC curve" , xlab = "1-Specificity (FPR)" , ylab = "Sensitivity(TPR)" , lwd = 5)
+# plot(perf_logit , col = "blue" , lwd = 5 , add = TRUE)
+# abline(0, 1 , lwd = 2)
+# legend("bottomright",legend = c("GradientBoosting(AUC = 0.867)","Logistic(AUC = 0.844)"), lty = 1 , col = c("red","blue") , lwd = 5)
 
-#####After feature selection#####
 
 ######PCA#####
 PCA <- read.csv("PCA.csv")
 stockfuture_PCA <- cbind( positive_revenue =  stockfuture$positive_revenue , PCA)
-stockfuture_PCA$positive_revenue <- as.factor(ifelse(stockfuture$nextday_openchange >= 0,1,0))
-
-stockfuture_PCA_train <- stockfuture_PCA[1:351,]
-stockfuture_PCA_test  <- stockfuture_PCA[352:475,]
-
-#logit
-stockfuture_PCA_logit <- glm(positive_revenue ~ .  , data = stockfuture_PCA_train , family = binomial("logit"))
-summary(stockfuture_PCA_logit)
-
-stockfuture.PCA.logit.pred.train_raw <- predict( stockfuture_PCA_logit , newdata = stockfuture_PCA_train)
-stockfuture.PCA.logit.pred.train <- ifelse(stockfuture.PCA.logit.pred.train_raw >= log(0.6/0.4) , 1,0)
-confusionMatrix(data = factor(stockfuture.PCA.logit.pred.train) , reference = factor(stockfuture_PCA_train$positive_revenue),positive = "1")
-#樣本內Accuracy為0.698
-
-stockfuture.PCA.logit.pred.test_raw <- predict( stockfuture_PCA_logit , newdata = stockfuture_PCA_test)
-stockfuture.PCA.logit.pred.test <- ifelse(stockfuture.PCA.logit.pred.test_raw >= log(0.6/0.4) , 1,0)
-confusionMatrix(data = factor(stockfuture.PCA.logit.pred.test) , reference = factor(stockfuture_PCA_test$positive_revenue),positive = "1")
-#PCA logit的樣本外Accuracy為0.645
-
-pred_PCA_logit_train <- prediction(stockfuture.PCA.logit.pred.train_raw , stockfuture_PCA_train$positive_revenue) 
-perf_PCA_logit_train <-performance (pred_PCA_logit_train , measure = "tpr" , x.measure = "fpr")
-performance(pred_PCA_logit_train, measure = "auc")@y.values[[1]]
-#樣本內AUC為0.753
-
-pred_PCA_logit <- prediction(stockfuture.PCA.logit.pred.test_raw , stockfuture_PCA_test$positive_revenue) 
-perf_PCA_logit <-performance (pred_PCA_logit , measure = "tpr" , x.measure = "fpr")
-performance(pred_PCA_logit, measure = "auc")@y.values[[1]]
-#PCA logit的AUC為0.733
-
-#Gradient Boosting
 stockfuture_PCA$positive_revenue <- ifelse(stockfuture$nextday_openchange >= 0,"1","0")
+
 stockfuture_PCA_train <- stockfuture_PCA[1:351,]
 stockfuture_PCA_test  <- stockfuture_PCA[352:475,]
 
@@ -223,40 +143,13 @@ pred_PCA_gbm <- prediction(stockfuture.PCA.gbm.pred.test_raw , stockfuture_PCA_t
 perf_PCA_gbm <- performance(pred_PCA_gbm , measure = "tpr" , x.measure = "fpr")
 performance(pred_PCA_gbm, measure = "auc")@y.values[[1]]
 #PCA Gradient Boosting的AUC為0.658
-#or0.658
 
-#####LASSO#####
+#####LASSO #####
 stockfuture %>%
-  select(positive_revenue,SP500change,SP500change_lag2,VIXvolume,USDchange,VIXchange,bitchange) -> stockfuture_LASSO
+  dplyr::select(positive_revenue,SP500change,SP500change_lag2,VIXvolume,USDchange,VIXchange,bitchange) -> stockfuture_LASSO
 
 stockfuture_LASSO_train <- stockfuture_LASSO[1:351,]
 stockfuture_LASSO_test  <- stockfuture_LASSO[352:475,]
-
-#logit
-stockfuture_LASSO_logit <- glm(positive_revenue ~ .  , data = stockfuture_LASSO_train , family = binomial("logit"))
-summary(stockfuture_LASSO_logit)
-
-stockfuture.LASSO.logit.pred.train_raw <- predict( stockfuture_LASSO_logit , newdata = stockfuture_LASSO_train)
-stockfuture.LASSO.logit.pred.train <- ifelse(stockfuture.LASSO.logit.pred.train_raw >= log(0.6/0.4) , 1,0)
-confusionMatrix(data = factor(stockfuture.LASSO.logit.pred.train) , reference = factor(stockfuture_LASSO_train$positive_revenue),positive = "1")
-#樣本內Accuracy為0.755
-
-stockfuture.LASSO.logit.pred.test_raw <- predict( stockfuture_LASSO_logit , newdata = stockfuture_LASSO_test)
-stockfuture.LASSO.logit.pred.test <- ifelse(stockfuture.LASSO.logit.pred.test_raw >= log(0.6/0.4) , 1,0)
-confusionMatrix(data = factor(stockfuture.LASSO.logit.pred.test) , reference = factor(stockfuture_LASSO_test$positive_revenue),positive = "1")
-#LASSO logit的樣本外Accuracy為0.7823
-
-pred_LASSO_logit_train <- prediction(stockfuture.LASSO.logit.pred.train_raw , stockfuture_LASSO_train$positive_revenue) 
-perf_LASSO_logit_train <-performance (pred_LASSO_logit_train , measure = "tpr" , x.measure = "fpr")
-performance(pred_LASSO_logit_train, measure = "auc")@y.values[[1]]
-#樣本內AUC為0.817
-
-pred_LASSO_logit <- prediction(stockfuture.LASSO.logit.pred.test_raw , stockfuture_LASSO_test$positive_revenue) 
-perf_LASSO_logit <-performance (pred_LASSO_logit , measure = "tpr" , x.measure = "fpr")
-performance(pred_LASSO_logit, measure = "auc")@y.values[[1]]
-#LASSO logit的樣本外AUC為0.847
-
-#Gradient Boosting
 
 stockfuture_LASSO$positive_revenue <- ifelse(stockfuture$nextday_openchange >= 0,"1","0")
 stockfuture_LASSO_train <- stockfuture_LASSO[1:351,]
@@ -305,44 +198,16 @@ performance(pred_LASSO_gbm, measure = "auc")@y.values[[1]]
 
 #####RF#####
 stockfuture %>%
-  select(positive_revenue,VIXchange,SP500change,SP500change_lag1,VIXvolume,ETHchange,openchange_lag1) -> stockfuture_RF
+  dplyr::select(positive_revenue,VIXchange,SP500change,SP500change_lag1,VIXvolume,ETHchange,openchange_lag1) -> stockfuture_RF
 
 stockfuture_RF_train <- stockfuture_RF[1:351,]
 stockfuture_RF_test  <- stockfuture_RF[352:475,]
 
-#logit
-stockfuture_RF_logit <- glm(positive_revenue ~ .  , data = stockfuture_RF_train , family = binomial("logit"))
-summary(stockfuture_RF_logit)
-
-stockfuture.RF.logit.pred.train_raw <- predict( stockfuture_RF_logit , newdata = stockfuture_RF_train)
-stockfuture.RF.logit.pred.train <- ifelse(stockfuture.RF.logit.pred.train_raw >= log(0.6/0.4) , 1,0)
-confusionMatrix(data = factor(stockfuture.RF.logit.pred.train) , reference = factor(stockfuture_RF_train$positive_revenue),positive = "1")
-#樣本內Accuracy為0.749
-
-stockfuture.RF.logit.pred.test_raw <- predict( stockfuture_RF_logit , newdata = stockfuture_RF_test)
-stockfuture.RF.logit.pred.test <- ifelse(stockfuture.RF.logit.pred.test_raw >= log(0.6/0.4) , 1,0)
-confusionMatrix(data = factor(stockfuture.RF.logit.pred.test) , reference = factor(stockfuture_RF_test$positive_revenue),positive = "1")
-#RF logit的樣本外Accuracy為0.750
-
-pred_RF_logit_train <- prediction(stockfuture.RF.logit.pred.train_raw , stockfuture_RF_train$positive_revenue) 
-perf_RF_logit_train <-performance (pred_RF_logit_train , measure = "tpr" , x.measure = "fpr")
-performance(pred_RF_logit_train, measure = "auc")@y.values[[1]]
-#樣本內AUC為0.798
-
-pred_RF_logit <- prediction(stockfuture.RF.logit.pred.test_raw , stockfuture_RF_test$positive_revenue) 
-perf_RF_logit <-performance (pred_RF_logit , measure = "tpr" , x.measure = "fpr")
-performance(pred_RF_logit, measure = "auc")@y.values[[1]]
-#RF logit的樣本外AUC為0.820
-
-#Gradient Boosting
 stockfuture_RF$positive_revenue <- ifelse(stockfuture$nextday_openchange >= 0,"1","0")
 stockfuture_RF_train <- stockfuture_RF[1:351,]
 stockfuture_RF_test  <- stockfuture_RF[352:475,]
 
 #Tuning
-ctrl <- trainControl(method = "repeatedcv",number = 10, repeats = 2, allowParallel = T , verboseIter = TRUE) #重複的cv，每次分10組，重複2次
-registerDoParallel(detectCores()-1)
-grid <- expand.grid(n.trees = c(2500,5000,10000), interaction.depth=c(1:2), shrinkage=c(0.001) , n.minobsinnode=40)
 
 #set.seed(1)
 #stockfuture.RF.gbm.caret <- caret::train(positive_revenue ~ ., data = stockfuture_RF_train, method = "gbm", metric = "Accuracy",
@@ -380,47 +245,19 @@ perf_RF_gbm <- performance(pred_RF_gbm , measure = "tpr" , x.measure = "fpr")
 performance(pred_RF_gbm, measure = "auc")@y.values[[1]]
 #RF Gradient Boosting的樣本外AUC為0.859
 
-#####LASSO和RF的交集變數#####
+#####Core#####
 
 stockfuture %>%
-  select(positive_revenue,VIXchange,SP500change,VIXvolume) -> stockfuture_core
+  dplyr::select(positive_revenue,VIXchange,SP500change,VIXvolume) -> stockfuture_core
 
 stockfuture_core_train <- stockfuture_core[1:351,]
 stockfuture_core_test  <- stockfuture_core[352:475,]
 
-#logit
-stockfuture_core_logit <- glm(positive_revenue ~ .  , data = stockfuture_core_train , family = binomial("logit"))
-summary(stockfuture_core_logit)
-
-stockfuture.core.logit.pred.train_raw <- predict( stockfuture_core_logit , newdata = stockfuture_core_train)
-stockfuture.core.logit.pred.train <- ifelse(stockfuture.core.logit.pred.train_raw >= log(0.6/0.4) , 1,0)
-confusionMatrix(data = factor(stockfuture.core.logit.pred.train) , reference = factor(stockfuture_core_train$positive_revenue),positive = "1")
-#樣本內Accuracy為0.7521
-
-stockfuture.core.logit.pred.test_raw <- predict( stockfuture_core_logit , newdata = stockfuture_core_test)
-stockfuture.core.logit.pred.test <- ifelse(stockfuture.core.logit.pred.test_raw >= log(0.6/0.4) , 1,0)
-confusionMatrix(data = factor(stockfuture.core.logit.pred.test) , reference = factor(stockfuture_core_test$positive_revenue),positive = "1")
-#core logit的樣本外Accuracy為0.7903
-
-pred_core_logit_train <- prediction(stockfuture.core.logit.pred.train_raw , stockfuture_core_train$positive_revenue) 
-perf_core_logit_train <-performance (pred_core_logit_train , measure = "tpr" , x.measure = "fpr")
-performance(pred_core_logit_train, measure = "auc")@y.values[[1]]
-#樣本內AUC為0.796
-
-pred_core_logit <- prediction(stockfuture.core.logit.pred.test_raw , stockfuture_core_test$positive_revenue) 
-perf_core_logit <-performance (pred_core_logit , measure = "tpr" , x.measure = "fpr")
-performance(pred_core_logit, measure = "auc")@y.values[[1]]
-#core logit的樣本外AUC為0.828
-
-#Gradient Boosting
 stockfuture_core$positive_revenue <- ifelse(stockfuture$nextday_openchange >= 0,"1","0")
 stockfuture_core_train <- stockfuture_core[1:351,]
 stockfuture_core_test  <- stockfuture_core[352:475,]
 
 #Tuning
-ctrl <- trainControl(method = "repeatedcv",number = 10, repeats = 2, allowParallel = T , verboseIter = TRUE) #重複的cv，每次分10組，重複2次
-registerDoParallel(detectCores()-1)
-grid <- expand.grid(n.trees = c(2500,5000,10000), interaction.depth=c(1:2), shrinkage=c(0.001) , n.minobsinnode=40)
 
 #set.seed(1)
 #stockfuture.core.gbm.caret <- caret::train(positive_revenue ~ ., data = stockfuture_core_train, method = "gbm", metric = "Accuracy",
